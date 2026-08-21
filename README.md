@@ -1,130 +1,127 @@
-# RecruitFlow API Engine
+# RecruitFlow — Applicant Tracking System (ATS) Backend
 
-A Spring Boot ATS backend (Java 21, Spring Data MongoDB, Spring Security).
+A Spring Boot backend for recruiting workflows: post jobs, manage candidate profiles, and move applications through a hiring pipeline — with **prefix/fuzzy candidate search** powered by MongoDB Atlas Search and **fine-grained, department-scoped authorization**.
 
-This scaffold focuses on the **autocomplete candidate search** feature — typing
-`mar` returns **Mark** and **Marcus** — built on **MongoDB Atlas Search** running
-locally via the `mongodb/mongodb-atlas-local` Docker image.
+**Stack:** Java 21 · Spring Boot 3 · Spring Data MongoDB (Atlas Local via Docker) · Spring Security + JWT (jjwt) · springdoc / Swagger UI · JUnit 5
 
-> Why Atlas Search and not native `$text`? Native MongoDB `$text` search only
-> matches whole words (with stemming), so `mar` matches nothing. Atlas Search's
-> `autocomplete` field type uses edge n-grams, which is what enables true prefix
-> matching with fuzzy typo tolerance and relevance ranking.
+## Features
 
-The auth (JWT/RBAC), job, and application-pipeline phases from the spec follow
-via TDD; `SecurityConfig` is currently permissive so the search endpoint and
-Swagger are reachable.
+- **Auth** — register / login / **refresh tokens** / logout, stateless JWT (15-min access, 7-day refresh).
+- **Jobs** — create, list, view, edit, delete postings.
+- **Candidate profiles** — view, update, and **autocomplete search**.
+- **Applications** — candidates apply to jobs and are advanced through a **hiring pipeline**.
+- **Autocomplete search** — typing `mar` returns **Mark**, **Marcus**, **Maria**… ranked by relevance, with typo tolerance (`makr` still finds `Mark`), built on **Atlas Search** `autocomplete` (edge n-gram) indexes.
+- **Role-based + ownership access control** — enforced at the method level (details below).
 
----
+> **Why Atlas Search, not native `$text`?** MongoDB's `$text` only matches whole words (with stemming), so `mar` matches nothing. Atlas Search's `autocomplete` field type uses edge n-grams — true prefix matching with fuzzy tolerance and relevance ranking.
 
-## Prerequisites
+## Authorization model
 
-- Docker Desktop (with WSL2 integration) — for MongoDB and for building.
-- JDK 21 — only needed if you run the app directly on Windows (Option B below).
-  You have it at `C:\Program Files\jdk-21.0.6`.
+Security is **enforced** (stateless JWT filter + `@EnableMethodSecurity`); only `/api/auth/**` and Swagger are public. Access is expressed with custom method annotations:
 
-## Project layout
+| Annotation | Rule |
+|---|---|
+| `@IsRecruiter` | caller has role `RECRUITER` |
+| `@IsProfileOwner` | `#userId` equals the authenticated user |
+| `@CanViewProfile` | the profile owner **or** any `RECRUITER` (post-authorization) |
+| `@CanEditJob` | the job's creating recruiter **or** an `ADMIN` (custom `PermissionEvaluator`) |
+| `@IsHiringManagerForApplication` | a `HIRING_MANAGER` **whose department owns the application** (`deptSecurity.isManagerForApplication`) |
 
-```
-recruit-flow/
-├── docker-compose.yml          # Atlas Local (MongoDB + Atlas Search engine)
-├── Dockerfile                  # Multi-stage build (no local Maven needed)
-├── scripts/
-│   ├── create-search-index.js  # Defines the autocomplete search index
-│   └── seed.js                 # Inserts demo candidates (Mark, Marcus, ...)
-├── pom.xml
-└── src/main/java/com/recruitflow/
-    ├── controller/CandidateController.java   # GET /api/candidates/search?q=
-    ├── service/CandidateSearchService.java   # Atlas $search autocomplete
-    ├── model/CandidateProfile.java
-    ├── repository/CandidateRepository.java
-    ├── dto/response/CandidateResponse.java
-    └── config/SecurityConfig.java            # temporary permit-all
-```
+**Roles:** `ADMIN`, `RECRUITER`, `HIRING_MANAGER`, `CANDIDATE`. Hiring managers are **scoped to their department** — an Engineering manager cannot act on a Marketing application.
 
----
+## API
 
-## Step 1 — Start MongoDB (Atlas Local)
+| Method & path | Purpose | Guard |
+|---|---|---|
+| `POST /api/auth/register` · `/login` · `/refresh` · `/logout` | Authentication | public |
+| `GET /api/candidates/search?q=` | Autocomplete candidate search | authenticated |
+| `GET /api/candidates/{userId}` | View a profile | `@CanViewProfile` |
+| `PUT /api/candidates/{userId}` | Update own profile | `@IsProfileOwner` |
+| `POST /api/jobs` · `GET /api/jobs` · `GET /api/jobs/{id}` | Create / list / view jobs | authenticated |
+| `PUT /api/jobs/{id}` · `DELETE /api/jobs/{id}` | Edit / delete a job | `@CanEditJob` |
+| `POST /api/applications` | Apply to a job | authenticated |
+| `PATCH /api/applications/{appId}/stage` | Advance the pipeline stage | `@IsHiringManagerForApplication` |
+| `GET /api/applications/{appId}` | View an application | authenticated |
 
-From the project folder (`C:\Users\user\recruit-flow`):
+**Pipeline stages:** `APPLIED → SCREEN → INTERVIEW → OFFER → HIRED` (or `REJECTED`).
+
+Interactive API docs: **http://localhost:8080/swagger-ui.html**
+
+## Getting started
+
+**Prerequisites:** Docker Desktop (for Atlas Local) · JDK 21 (to run the app directly).
+
+### 1. Start MongoDB (Atlas Local)
 
 ```bash
 docker compose up -d
 ```
+Wait for `recruitflow-mongo` to report `healthy` (`docker compose ps`). It runs a single-node replica set on host port **27018** and connects with `directConnection=true`.
 
-Wait until it's healthy (about 20–30s the first time):
-
-```bash
-docker compose ps
-```
-
-You want STATUS `healthy` for `recruitflow-mongo`.
-
-## Step 2 — Create the search index + seed demo data
-
-The Atlas Local container ships with `mongosh`, so run the scripts inside it:
+### 2. Create the search index + seed demo candidates
 
 ```bash
 docker exec recruitflow-mongo mongosh --quiet --file /scripts/create-search-index.js
 ```
-
 ```bash
 docker exec recruitflow-mongo mongosh --quiet --file /scripts/seed.js
 ```
-
-The search index takes ~10–30s to become queryable after creation. Check status:
-
+The index takes ~10–30s to become queryable. Check with:
 ```bash
 docker exec recruitflow-mongo mongosh --quiet --eval "db.getSiblingDB('recruitflow').candidate_profiles.getSearchIndexes().forEach(i => print(i.name, i.status))"
 ```
+Wait for `candidateAutocomplete READY`.
 
-Wait until it prints `candidateAutocomplete READY`.
+### 3. Run the app
 
-## Step 3 — Build and run the app
-
-### Option A — build in Docker, run on Windows with JDK 21 (recommended)
-
-Build the jar without needing Maven installed (run in **PowerShell** from the project folder):
-
+Build in Docker (no local Maven needed), then run with JDK 21:
 ```bash
 docker run --rm -v "${PWD}:/app" -w /app maven:3.9-eclipse-temurin-21 mvn -q clean package -DskipTests
 ```
-
-Run it with **JDK 21 explicitly** (your default `java` on PATH is Java 8, which won't run a 21 build):
-
 ```bash
 & "C:\Program Files\jdk-21.0.6\bin\java.exe" -jar target\recruit-flow-0.0.1-SNAPSHOT.jar
 ```
+> On Windows your default `java` is Java 8, which can't run a 21 build — invoke JDK 21 explicitly as above.
 
-### Option B — run entirely in Docker
+On startup a `DataSeeder` inserts demo **users** (and an Engineering job + application to demo department security).
+
+### Demo users (dev only — password = username)
+
+| Username | Role | Department |
+|---|---|---|
+| `admin` | ADMIN | — |
+| `recruiter`, `recruiter2` | RECRUITER | — |
+| `candidate` | CANDIDATE | — |
+| `eng_manager` | HIRING_MANAGER | Engineering |
+| `mkt_manager` | HIRING_MANAGER | Marketing |
+
+## Try it
 
 ```bash
-docker build -t recruitflow-app .
+# 1) Log in to get a JWT
+curl -s -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"recruiter","password":"recruiter"}'
+
+# 2) Autocomplete search (use the "token" value from step 1's response)
+curl "http://localhost:8080/api/candidates/search?q=mar" -H "Authorization: Bearer <token>"
 ```
+Expected: Mark, Marcus, Maria, Marta — ranked by relevance. Try `q=marc` or a typo like `q=makr`.
+
+## Tests
 
 ```bash
-docker run --rm -p 8080:8080 --network recruit-flow_default -e MONGODB_URI="mongodb://mongodb:27017/recruitflow?directConnection=true" recruitflow-app
+mvn clean test
 ```
-
-> The `--network recruit-flow_default` value is the network Compose created for
-> Step 1; confirm the exact name with `docker network ls`.
-
-## Step 4 — Try the autocomplete search
-
-```bash
-curl "http://localhost:8080/api/candidates/search?q=mar"
-```
-
-Expected: Mark, Marcus, Maria, Marta — ranked by relevance. Try `q=mark`,
-`q=marc`, or a typo like `q=makr` (fuzzy tolerance).
-
-Swagger UI: http://localhost:8080/swagger-ui.html
-
----
+Integration tests cover auth, jobs, applications, candidate search, and the method-security rules (`MethodSecurityTest`).
 
 ## Stopping / resetting
 
 ```bash
-docker compose down        # stop containers, keep data
-docker compose down -v      # stop AND wipe the database volume
+docker compose down       # stop, keep data
+docker compose down -v     # stop AND wipe the database volume
 ```
+
+## Configuration secrets
+
+Only `${ENV_VAR}` placeholders with dev-only defaults are committed. Provide real values via environment (`MONGO_URI`, `JWT_SECRET`, …) or a git-ignored `.env` / `application-local.yml`.
