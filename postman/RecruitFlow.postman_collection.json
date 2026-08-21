@@ -1,0 +1,610 @@
+{
+  "info": {
+    "name": "RecruitFlow API",
+    "_postman_id": "b1a7c0de-0000-4a00-9000-recruitflow01",
+    "description": "Full RecruitFlow ATS workflow: candidate self-registration, stateless JWT auth with refresh tokens & logout, autocomplete candidate search & profiles, jobs with role + object-level ownership security, and the application pipeline with department-level security and auditing (updatedBy/updatedAt).\n\nHOW TO USE:\n1. Start the app (http://localhost:8080) and MongoDB (docker compose up -d).\n2. Run the requests top-to-bottom, or use the Collection Runner.\n3. Login/Register requests save tokens into collection variables automatically; later requests reuse them. Login - Recruiter also saves {{refreshToken}}. Create Job saves {{jobId}}; Apply saves {{appId}}.\n\nToken lifecycle: the access token (\"token\") is short-lived (~15 min); use Refresh Token to get a new one, and Logout to revoke the refresh token.\n\nDemo users (seeded by DataSeeder): admin/admin, recruiter/recruiter, recruiter2/recruiter2 (second recruiter, for job-ownership tests), candidate/candidate, eng_manager/eng_manager (Engineering), mkt_manager/mkt_manager (Marketing). Registered users are always CANDIDATE.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080", "type": "string" },
+    { "key": "recruiterToken", "value": "", "type": "string" },
+    { "key": "candidateToken", "value": "", "type": "string" },
+    { "key": "engManagerToken", "value": "", "type": "string" },
+    { "key": "mktManagerToken", "value": "", "type": "string" },
+    { "key": "adminToken", "value": "", "type": "string" },
+    { "key": "newCandidateToken", "value": "", "type": "string" },
+    { "key": "refreshToken", "value": "", "type": "string" },
+    { "key": "recruiter2Token", "value": "", "type": "string" },
+    { "key": "deleteJobId", "value": "", "type": "string" },
+    { "key": "jobId", "value": "", "type": "string" },
+    { "key": "appId", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "1. Auth",
+      "item": [
+        {
+          "name": "Register (Candidate)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const j = pm.response.json();",
+                  "pm.collectionVariables.set('newCandidateToken', j.token);",
+                  "pm.test('role is CANDIDATE', () => pm.expect(j.role).to.eql('CANDIDATE'));",
+                  "console.log('registered:', j.username);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"username\": \"newcandidate_{{$timestamp}}\",\n  \"password\": \"secret123\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/register", "host": ["{{baseUrl}}"], "path": ["api", "auth", "register"] }
+          }
+        },
+        {
+          "name": "Register Duplicate (expect 409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('409 Conflict (username taken)', () => pm.response.to.have.status(409));"]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"username\": \"recruiter\",\n  \"password\": \"secret123\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/register", "host": ["{{baseUrl}}"], "path": ["api", "auth", "register"] }
+          }
+        },
+        {
+          "name": "Login - Recruiter",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.collectionVariables.set('recruiterToken', json.token);",
+                  "pm.collectionVariables.set('refreshToken', json.refreshToken);",
+                  "pm.test('role is RECRUITER', () => pm.expect(json.role).to.eql('RECRUITER'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"username\": \"recruiter\",\n  \"password\": \"recruiter\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] }
+          }
+        },
+        {
+          "name": "Login - Candidate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('candidateToken', pm.response.json().token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"username\": \"candidate\",\n  \"password\": \"candidate\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] }
+          }
+        },
+        {
+          "name": "Login - Eng Manager",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('engManagerToken', pm.response.json().token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"username\": \"eng_manager\",\n  \"password\": \"eng_manager\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] }
+          }
+        },
+        {
+          "name": "Login - Mkt Manager",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('mktManagerToken', pm.response.json().token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"username\": \"mkt_manager\",\n  \"password\": \"mkt_manager\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] }
+          }
+        },
+        {
+          "name": "Login - Recruiter2",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('recruiter2Token', pm.response.json().token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"username\": \"recruiter2\",\n  \"password\": \"recruiter2\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] }
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.collectionVariables.set('recruiterToken', j.token);",
+                  "pm.collectionVariables.set('refreshToken', j.refreshToken);",
+                  "pm.test('new tokens issued', () => { pm.expect(j.token).to.be.ok; pm.expect(j.refreshToken).to.be.ok; });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/refresh", "host": ["{{baseUrl}}"], "path": ["api", "auth", "refresh"] }
+          }
+        },
+        {
+          "name": "Logout (revoke refresh token)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/logout", "host": ["{{baseUrl}}"], "path": ["api", "auth", "logout"] }
+          }
+        },
+        {
+          "name": "Login - Invalid (expect 401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('401 Unauthorized', () => pm.response.to.have.status(401));"]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"username\": \"recruiter\",\n  \"password\": \"wrong\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Candidates",
+      "item": [
+        {
+          "name": "Search Autocomplete (q=mar)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const names = pm.response.json().map(c => c.name);",
+                  "console.log('matches:', names.join(', '));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{recruiterToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/candidates/search?q=mar&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "candidates", "search"],
+              "query": [{ "key": "q", "value": "mar" }, { "key": "limit", "value": "10" }]
+            }
+          }
+        },
+        {
+          "name": "Get Own Profile (Candidate)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('200 OK', () => pm.response.to.have.status(200));"]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{candidateToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/candidates/candidate", "host": ["{{baseUrl}}"], "path": ["api", "candidates", "candidate"] }
+          }
+        },
+        {
+          "name": "Update Own Profile (Candidate)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('200 OK', () => pm.response.to.have.status(200));"]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{candidateToken}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Charlie Candidate\",\n  \"bio\": \"Backend developer\",\n  \"skills\": [\"Java\", \"Spring Boot\", \"MongoDB\"],\n  \"yearsExperience\": 3\n}" },
+            "url": { "raw": "{{baseUrl}}/api/candidates/candidate", "host": ["{{baseUrl}}"], "path": ["api", "candidates", "candidate"] }
+          }
+        },
+        {
+          "name": "Update Another Profile as Recruiter (expect 403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('403 Forbidden (only the owner may edit their profile)', () => pm.response.to.have.status(403));"]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{recruiterToken}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Jane Smith\",\n  \"bio\": \"Recruiters can read but not edit candidate profiles\",\n  \"skills\": [\"Java\", \"Kotlin\", \"AWS\"],\n  \"yearsExperience\": 7\n}" },
+            "url": { "raw": "{{baseUrl}}/api/candidates/candidate", "host": ["{{baseUrl}}"], "path": ["api", "candidates", "candidate"] }
+          }
+        },
+        {
+          "name": "Get Another Profile as Candidate (expect 403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('403 Forbidden (candidates cannot read others)', () => pm.response.to.have.status(403));"]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{candidateToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/candidates/someone-else", "host": ["{{baseUrl}}"], "path": ["api", "candidates", "someone-else"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Jobs",
+      "item": [
+        {
+          "name": "Create Job (Recruiter)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('jobId', pm.response.json().id);",
+                  "console.log('jobId =', pm.collectionVariables.get('jobId'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{recruiterToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Backend Engineer\",\n  \"description\": \"Build and maintain APIs\",\n  \"department\": \"Engineering\",\n  \"minExperience\": 3\n}" },
+            "url": { "raw": "{{baseUrl}}/api/jobs", "host": ["{{baseUrl}}"], "path": ["api", "jobs"] }
+          }
+        },
+        {
+          "name": "Create Job as Candidate (expect 403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('403 Forbidden (only RECRUITER can create)', () => pm.response.to.have.status(403));"]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{candidateToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Sneaky Job\",\n  \"description\": \"nope\",\n  \"department\": \"Engineering\",\n  \"minExperience\": 1\n}" },
+            "url": { "raw": "{{baseUrl}}/api/jobs", "host": ["{{baseUrl}}"], "path": ["api", "jobs"] }
+          }
+        },
+        {
+          "name": "Create Job - Invalid Payload (expect 400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('400 Bad Request (validation)', () => pm.response.to.have.status(400));"]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{recruiterToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"\",\n  \"department\": \"\",\n  \"minExperience\": -1\n}" },
+            "url": { "raw": "{{baseUrl}}/api/jobs", "host": ["{{baseUrl}}"], "path": ["api", "jobs"] }
+          }
+        },
+        {
+          "name": "List Jobs",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{recruiterToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/jobs", "host": ["{{baseUrl}}"], "path": ["api", "jobs"] }
+          }
+        },
+        {
+          "name": "Get Job by Id",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{recruiterToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/jobs/{{jobId}}", "host": ["{{baseUrl}}"], "path": ["api", "jobs", "{{jobId}}"] }
+          }
+        },
+        {
+          "name": "Update Job as Owner (expect 200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('200 OK (the creating recruiter can edit)', () => pm.response.to.have.status(200));"]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{recruiterToken}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Backend Engineer (updated)\",\n  \"description\": \"Updated by owner\",\n  \"department\": \"Engineering\",\n  \"minExperience\": 4\n}" },
+            "url": { "raw": "{{baseUrl}}/api/jobs/{{jobId}}", "host": ["{{baseUrl}}"], "path": ["api", "jobs", "{{jobId}}"] }
+          }
+        },
+        {
+          "name": "Update Job as Other Recruiter (expect 403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('403 Forbidden (not the creator)', () => pm.response.to.have.status(403));"]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{recruiter2Token}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Hijacked\",\n  \"department\": \"Engineering\",\n  \"minExperience\": 1\n}" },
+            "url": { "raw": "{{baseUrl}}/api/jobs/{{jobId}}", "host": ["{{baseUrl}}"], "path": ["api", "jobs", "{{jobId}}"] }
+          }
+        },
+        {
+          "name": "Create Job to Delete",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('deleteJobId', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{recruiterToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Temp Job\",\n  \"department\": \"Engineering\",\n  \"minExperience\": 1\n}" },
+            "url": { "raw": "{{baseUrl}}/api/jobs", "host": ["{{baseUrl}}"], "path": ["api", "jobs"] }
+          }
+        },
+        {
+          "name": "Delete Job as Owner (expect 204)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('204 No Content (the creating recruiter can delete)', () => pm.response.to.have.status(204));"]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{recruiterToken}}", "type": "string" }] },
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/jobs/{{deleteJobId}}", "host": ["{{baseUrl}}"], "path": ["api", "jobs", "{{deleteJobId}}"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Applications",
+      "item": [
+        {
+          "name": "Apply to Job (Candidate)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('appId', pm.response.json().id);",
+                  "console.log('appId =', pm.collectionVariables.get('appId'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{candidateToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"jobId\": \"{{jobId}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/applications", "host": ["{{baseUrl}}"], "path": ["api", "applications"] }
+          }
+        },
+        {
+          "name": "Advance Stage - Eng Manager (expect 200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK (own department)', () => pm.response.to.have.status(200));",
+                  "pm.test('auditing records who advanced it', () => pm.expect(pm.response.json().updatedBy).to.eql('eng_manager'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{engManagerToken}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"stage\": \"SCREEN\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/applications/{{appId}}/stage", "host": ["{{baseUrl}}"], "path": ["api", "applications", "{{appId}}", "stage"] }
+          }
+        },
+        {
+          "name": "Advance Stage - Mkt Manager (expect 403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('403 Forbidden (wrong department)', () => pm.response.to.have.status(403));"]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{mktManagerToken}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"stage\": \"OFFER\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/applications/{{appId}}/stage", "host": ["{{baseUrl}}"], "path": ["api", "applications", "{{appId}}", "stage"] }
+          }
+        },
+        {
+          "name": "Get Application by Id",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{candidateToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/applications/{{appId}}", "host": ["{{baseUrl}}"], "path": ["api", "applications", "{{appId}}"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Unauthenticated (expect 401)",
+      "item": [
+        {
+          "name": "List Jobs - No Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('401 Unauthorized', () => pm.response.to.have.status(401));"]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/jobs", "host": ["{{baseUrl}}"], "path": ["api", "jobs"] }
+          }
+        }
+      ]
+    }
+  ]
+}

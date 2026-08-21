@@ -1,0 +1,7 @@
+# Integration tests (Option B): run against a running MongoDB Atlas Local
+# instance, using a dedicated test database so dev data is untouched.
+# Override with the MONGODB_TEST_URI env var if needed.
+spring:
+  data:
+    mongodb:
+      uri: ${MONGODB_TEST_URI:mongodb://localhost:27018/recruitflow_test?directConnection=true}

@@ -1,0 +1,19 @@
+services:
+  mongodb:
+    image: mongodb/mongodb-atlas-local:latest
+    container_name: recruitflow-mongo
+    ports:
+      # Host port 27018 avoids clashing with a native MongoDB on 27017.
+      # Inside the container Mongo still listens on 27017.
+      - "27018:27017"
+    volumes:
+      - mongodata:/data/db
+      - ./scripts:/scripts:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  mongodata:

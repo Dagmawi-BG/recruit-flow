@@ -1,0 +1,27 @@
+spring:
+  application:
+    name: recruitflow
+  data:
+    mongodb:
+      # Atlas Local presents as a single-node replica set, so directConnection=true is required.
+      # Host port 27018 (see docker-compose.yml) avoids clashing with a native MongoDB on 27017.
+      uri: ${MONGODB_URI:mongodb://localhost:27018/recruitflow?directConnection=true}
+  mvc:
+    problemdetails:
+      enabled: true
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+app:
+  jwt:
+    # Override in production via the JWT_SECRET env var. Must be >= 32 bytes for HS256.
+    secret: ${JWT_SECRET:change-me-to-a-very-long-development-only-secret-key-32b+}
+    # Short-lived access token (15 min) + long-lived, revocable refresh token (7 days).
+    expiration-ms: ${JWT_EXPIRATION_MS:900000}
+    refresh-expiration-ms: ${JWT_REFRESH_EXPIRATION_MS:604800000}
+
+logging:
+  level:
+    org.springframework.data.mongodb: INFO
